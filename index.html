@@ -1,0 +1,286 @@
+<!DOCTYPE html>  
+<html lang="ko">  
+<head>  
+    <meta charset="UTF-8">  
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">  
+    <title>FAB Run Analysis Dashboard v2</title>  
+    <!-- 라이브러리 CDN -->  
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>  
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>  
+    <style>  
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Pretendard', sans-serif; }  
+        body { background-color: #0f172a; color: #f8fafc; padding: 30px; min-height: 100vh; }  
+        .container { max-width: 1300px; margin: 0 auto; }  
+          
+        header { margin-bottom: 30px; text-align: center; }  
+        header h1 { font-size: 2rem; color: #e2e8f0; }
+
+        /* 업로드 영역 */  
+        #upload-area {  
+            border: 2px dashed #475569; border-radius: 20px; padding: 40px; text-align: center;  
+            cursor: pointer; background: rgba(30, 41, 59, 0.5); margin-bottom: 30px; transition: 0.3s;  
+        }  
+        #upload-area.dragover { border-color: #6366f1; background: rgba(99, 102, 241, 0.1); }
+
+        /* 필터 섹션 */  
+        .filter-section {   
+            background: rgba(30, 41, 59, 0.8); padding: 20px; border-radius: 20px;   
+            border: 1px solid rgba(255,255,255,0.1); margin-bottom: 30px;  
+            display: none; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; align-items: center;  
+        }  
+        .filter-group { display: flex; flex-direction: column; gap: 10px; }  
+        .filter-group label { font-size: 0.9rem; color: #94a3b8; }  
+        select, input[type="range"] { width: 100%; padding: 8px; border-radius: 8px; background: #1e293b; color: white; border: 1px solid #475569; }
+
+        /* KPI 카드 */  
+        .kpi-container {   
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));   
+            gap: 20px; margin-bottom: 30px; display: none;   
+        }  
+        .kpi-card {   
+            background: rgba(30, 41, 59, 0.8); padding: 20px; border-radius: 20px;   
+            border: 1px solid rgba(255,255,255,0.1); text-align: center;   
+        }  
+        .kpi-label { font-size: 0.9rem; color: #94a3b8; display: block; margin-bottom: 10px; }  
+        .kpi-value { font-size: 2rem; font-weight: 800; }
+
+        /* 인사이트 문구 */  
+        #insight-box {   
+            background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444;   
+            padding: 15px; border-radius: 8px; margin-bottom: 30px; display: none;  
+            color: #fca5a5; font-weight: 500;   
+        }
+
+        /* 메인 콘텐츠 (차트 & 표) */  
+        .main-content { display: none; gap: 30px; }  
+        .chart-box {   
+            background: rgba(30, 41, 59, 0.8); padding: 20px; border-radius: 20px;   
+            border: 1px solid rgba(255,255,255,0.1); flex: 2;   
+        }  
+        .table-box {   
+            background: rgba(30, 41, 59, 0.8); padding: 20px; border-radius: 20px;   
+            border: 1px solid rgba(255,255,255,0.1); flex: 1; overflow-x: auto;   
+        }  
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left; }  
+        th, td { padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); }  
+        th { color: #94a3b8; font-weight: 500; }  
+    </style>  
+</head>  
+<body>
+
+    <div class="container">  
+        <header>  
+            <h1>FAB Run Analysis Dashboard</h1>  
+        </header>
+
+        <div id="upload-area">  
+            <p>📄 CSV 파일을 업로드하세요</p>  
+            <input type="file" id="file-input" accept=".csv" style="display: none;">  
+        </div>
+
+        <!-- 필터 영역 -->  
+        <div class="filter-section" id="filter-section">  
+            <div class="filter-group">  
+                <label>Product 필터</label>  
+                <select id="product-filter"><option value="ALL">전체 제품</option></select>  
+            </div>  
+            <div class="filter-group">  
+                <label>날짜 범위: <span id="date-range-text">전체</span></label>  
+                <input type="range" id="date-slider" min="0" max="100" value="0">  
+            </div>  
+        </div>
+
+        <div id="insight-box"></div>
+
+        <div class="kpi-container" id="kpi-container">  
+            <div class="kpi-card">  
+                <span class="kpi-label">총 런 수</span>  
+                <div class="kpi-value" id="total-runs">0</div>  
+            </div>  
+            <div class="kpi-card">  
+                <span class="kpi-label">전체 Fail율</span>  
+                <div class="kpi-value" id="fail-rate">0%</div>  
+            </div>  
+            <div class="kpi-card">  
+                <span class="kpi-label">최다 Fail 장비</span>  
+                <div class="kpi-value" id="worst-eq">-</div>  
+            </div>  
+        </div>
+
+        <div class="main-content" id="main-content" style="display: flex;">  
+            <div class="chart-box">  
+                <canvas id="eqChart"></canvas>  
+            </div>  
+            <div class="table-box">  
+                <h3 style="margin-bottom: 15px; font-size: 1rem;">장비 드릴다운 상세</h3>  
+                <table id="detail-table">  
+                    <thead><tr><th>Run ID</th><th>Product</th><th>Result</th></tr></thead>  
+                    <tbody><tr><td colspan="3" style="text-align:center; color:#64748b;">장비를 클릭하세요</td></tr></tbody>  
+                </table>  
+            </div>  
+        </div>  
+    </div>
+
+    <script>  
+        let rawData = [];   
+        let filteredData = [];  
+        let eqChart = null;
+
+        const fileInput = document.getElementById('file-input');  
+        const uploadArea = document.getElementById('upload-area');
+
+        uploadArea.onclick = () => fileInput.click();  
+        uploadArea.ondragover = (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); };  
+        uploadArea.ondragleave = () => uploadArea.classList.remove('dragover');  
+        uploadArea.ondrop = (e) => { e.preventDefault(); uploadArea.classList.remove('dragover'); handleFile(e.dataTransfer.files[0]); };  
+        fileInput.onchange = (e) => handleFile(e.target.files[0]);
+
+        function handleFile(file) {  
+            Papa.parse(file, {  
+                header: true, dynamicTyping: true, skipEmptyLines: true,  
+                complete: (results) => {  
+                    rawData = results.data;  
+                    initDashboard();  
+                }  
+            });  
+        }
+
+        function initDashboard() {  
+            // 1. 필터 옵션 초기화  
+            const products = [...new Set(rawData.map(row => row.Product || row.product || 'Unknown'))];  
+            const productSelect = document.getElementById('product-filter');  
+            products.forEach(p => productSelect.add(new Option(p, p)));
+
+            // 2. 날짜 범위 초기화  
+            const dates = rawData.map(row => new Date(row.Date || row.date || 0)).filter(d => !isNaN(d)).sort((a,b) => a-b);  
+            const dateSlider = document.getElementById('date-slider');  
+            dateSlider.max = dates.length - 1;
+
+            // UI 보이기  
+            document.getElementById('filter-section').style.display = 'grid';  
+            document.getElementById('kpi-container').style.display = 'grid';  
+            document.getElementById('main-content').style.display = 'flex';  
+            uploadArea.style.display = 'none';
+
+            // 이벤트 리스너 등록  
+            productSelect.onchange = updateDashboard;  
+            dateSlider.oninput = (e) => {  
+                const minDate = dates[0];  
+                const selectedDate = dates[e.target.value];  
+                document.getElementById('date-range-text').innerText = `${minDate.toLocaleDateString()} ~ ${selectedDate.toLocaleDateString()}`;  
+                updateDashboard();  
+            };
+
+            updateDashboard();  
+        }
+
+        function updateDashboard() {  
+            const selectedProd = document.getElementById('product-filter').value;  
+            const dateIdx = document.getElementById('date-slider').value;  
+            const dates = rawData.map(row => new Date(row.Date || row.date || 0)).filter(d => !isNaN(d)).sort((a,b) => a-b);  
+            const maxDate = dates[dateIdx];
+
+            // 필터링 적용  
+            filteredData = rawData.filter(row => {  
+                const prod = row.Product || row.product || 'Unknown';  
+                const date = new Date(row.Date || row.date || 0);  
+                const prodMatch = (selectedProd === 'ALL' || prod === selectedProd);  
+                const dateMatch = isNaN(maxDate) ? true : date <= maxDate;  
+                return prodMatch && dateMatch;  
+            });
+
+            renderKPI();  
+            renderChart();  
+        }
+
+        function renderKPI() {  
+            const total = filteredData.length;  
+            const fails = filteredData.filter(row => String(Object.values(row).find(v => String(v).toLowerCase() === 'fail') || '').toLowerCase() === 'fail').length;  
+            const failRate = total > 0 ? ((fails / total) * 100).toFixed(2) : 0;
+
+            const eqColumn = Object.keys(rawData[0]).find(k => k.toLowerCase().includes('eq') || k.toLowerCase().includes('tool'));  
+            const eqCounts = {};  
+            filteredData.forEach(row => {  
+                if (String(Object.values(row).find(v => String(v).toLowerCase() === 'fail') || '').toLowerCase() === 'fail') {  
+                    const eq = row[eqColumn] || 'Unknown';  
+                    eqCounts[eq] = (eqCounts[eq] || 0) + 1;  
+                }  
+            });
+
+            const worstEq = Object.keys(eqCounts).reduce((a, b) => eqCounts[a] > eqCounts[b] ? a : b, '-');
+
+            document.getElementById('total-runs').innerText = total.toLocaleString();  
+            document.getElementById('fail-rate').innerText = failRate + '%';  
+            document.getElementById('worst-eq').innerText = worstEq;
+
+            // 이상 장비 한 줄 짚어주기  
+            const insightBox = document.getElementById('insight-box');  
+            if (worstEq !== '-' && failRate > 5) {  
+                insightBox.style.display = 'block';  
+                insightBox.innerText = `⚠️ 경고: 현재 ${worstEq} 장비에서 집중적인 Fail이 발생하고 있습니다. 점검이 필요합니다.`;  
+            } else {  
+                insightBox.style.display = 'none';  
+            }  
+        }
+
+        function renderChart() {  
+            const eqColumn = Object.keys(rawData[0]).find(k => k.toLowerCase().includes('eq') || k.toLowerCase().includes('tool'));  
+            const eqStats = {};
+
+            filteredData.forEach(row => {  
+                const eq = row[eqColumn] || 'Unknown';  
+                if (!eqStats[eq]) eqStats[eq] = { total: 0, fail: 0 };  
+                eqStats[eq].total++;  
+                if (String(Object.values(row).find(v => String(v).toLowerCase() === 'fail') || '').toLowerCase() === 'fail') {  
+                    eqStats[eq].fail++;  
+                }  
+            });
+
+            const labels = Object.keys(eqStats);  
+            const data = labels.map(eq => ((eqStats[eq].fail / eqStats[eq].total) * 100).toFixed(2));  
+            const colors = data.map(val => val > 15 ? '#ef4444' : '#6366f1'); // 15% 이상이면 빨간색
+
+            if (eqChart) eqChart.destroy();  
+            const ctx = document.getElementById('eqChart').getContext('2d');  
+            eqChart = new Chart(ctx, {  
+                type: 'bar',  
+                data: {  
+                    labels: labels,  
+                    datasets: [{ label: '장비별 Fail율 (%)', data: data, backgroundColor: colors }]  
+                },  
+                options: {  
+                    responsive: true,  
+                    onClick: (e, elements) => {  
+                        if (elements.length > 0) {  
+                            const idx = elements[0].index;  
+                            drillDown(labels[idx]);  
+                        }  
+                    },  
+                    scales: {   
+                        y: { beginAtZero: true, grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },  
+                        x: { grid: { display: false }, ticks: { color: '#94a3b8' } }  
+                    },  
+                    plugins: { legend: { display: false } }  
+                }  
+            });  
+        }
+
+        function drillDown(eqName) {  
+            const eqColumn = Object.keys(rawData[0]).find(k => k.toLowerCase().includes('eq') || k.toLowerCase().includes('tool'));  
+            const filtered = filteredData.filter(row => (row[eqColumn] || 'Unknown') === eqName);  
+              
+            const tbody = document.querySelector('#detail-table tbody');  
+            tbody.innerHTML = filtered.slice(0, 20).map(row => `  
+                <tr>  
+                    <td>${row.RunID || row.run_id || 'N/A'}</td>  
+                    <td>${row.Product || row.product || 'N/A'}</td>  
+                    <td style="color: ${String(Object.values(row).find(v => String(v).toLowerCase() === 'fail') || '').toLowerCase() === 'fail' ? '#ef4444' : '#16a34a'}">  
+                        ${String(Object.values(row).find(v => String(v).toLowerCase() === 'fail' || String(v).toLowerCase() === 'pass') || 'Unknown')}  
+                    </td>  
+                </tr>  
+            `).join('');  
+            if (filtered.length === 0) tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">데이터가 없습니다.</td></tr>';  
+        }  
+    </script>  
+</body>  
+</html>  
